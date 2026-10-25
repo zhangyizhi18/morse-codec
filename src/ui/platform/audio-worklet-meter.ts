@@ -27,6 +27,8 @@ export interface AudioRun {
   on: boolean;
   /** 采样点数 */
   samples: number;
+  /** true = 该段被判定为噪声爆发，应丢弃当前码字 */
+  noise?: boolean;
 }
 
 /** 采集器接口 */
@@ -107,6 +109,12 @@ class WorkletCollector implements AudioCollector {
           { on: msg.on as boolean, samples: msg.samples as number },
           ctx.sampleRate,
         );
+      } else if (msg.type === 'noise') {
+        // 噪声爆发：通知解码器丢弃当前码字
+        onRun(
+          { on: false, samples: 0, noise: true },
+          ctx.sampleRate,
+        );
       } else if (msg.type === 'level' && onLevel) {
         onLevel(msg.rms as number);
       }
@@ -122,6 +130,15 @@ class WorkletCollector implements AudioCollector {
   }
 
   stop(): void {
+    // 先要求 worklet 把未完成的段发出来 ——
+    // 否则末尾字符会丢（音频结束时最后一个符号还没遇到间隔）。
+    if (this.node?.port) {
+      try {
+        this.node.port.postMessage({ type: 'flush' });
+      } catch {
+        /* worklet 已失效 */
+      }
+    }
     if (this.node?.port) this.node.port.onmessage = null;
     try {
       this.node?.disconnect();

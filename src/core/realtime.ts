@@ -441,6 +441,19 @@ export class RealtimeDecoder {
    * @param samples 该段的采样点数
    * @param sampleRate 采样率
    */
+  /**
+   * 通知解码器「刚发生了一次噪声爆发」。
+   *
+   * 采集端检测到异常长的信号段（远超正常划）时调用。
+   * 此时当前累积的码字不可信，直接丢弃 ——
+   * 宁可少一个字符，也不要输出错误字符。
+   */
+  rejectNoise(): RealtimeState {
+    this.pending = '';
+    this.unknownCount++;
+    return this.getState();
+  }
+
   pushRun(on: boolean, samples: number, sampleRate: number): RealtimeState {
     const ms = (samples / sampleRate) * 1000;
     this.queueRun(on, ms);
@@ -612,6 +625,21 @@ export class RealtimeDecoder {
   private classifyMark(durationMs: number): void {
     // 划 = 3u，点 = 1u；阈值取 2u
     const isDash = durationMs > this.unitMs * 1.9;
+
+    // 过长的信号段不可能是有效符号。
+    //
+    // 摩斯最长的符号是划（3u）。实测真实麦克风下，一次突发噪声
+    // （关门、放下手机）会把相邻两个划之间的 1u 间隔填满，
+    // 合并出一个 435ms 的段（正常划 200ms）——
+    // 若照常判成划，整段文本就乱了。
+    //
+    // 因此超过 5u 的段直接丢弃并计入未知，宁可少一个符号，
+    // 也不要把噪声当成划。
+    if (durationMs > this.unitMs * 5) {
+      this.unknownCount++;
+      return;
+    }
+
     this.pending += isDash ? '-' : '.';
     this.symbolCount++;
   }

@@ -92,7 +92,9 @@ export function LivePanel({ codebook, toast, frequency }: Props) {
         // 段模式：段长由 AudioWorklet 在音频线程精确计数，
         // 不受消息队列丢包影响
         (run, sampleRate) => {
-          const state = decoder.pushRun(run.on, run.samples, sampleRate);
+          const state = run.noise
+            ? decoder.rejectNoise()
+            : decoder.pushRun(run.on, run.samples, sampleRate);
           // 仅在文本变化时更新，避免高频渲染
           if (state.text !== lastTextRef.current) {
             lastTextRef.current = state.text;
