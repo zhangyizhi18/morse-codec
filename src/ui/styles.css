@@ -651,6 +651,130 @@ button.btn.sm {
   box-shadow: 0 0 8px var(--ok);
 }
 
+
+/* ── 电键练习：判定反馈 ─────────────────────── */
+
+/* 每次按键的即时判定结果 */
+.key-judge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  font-size: 13px;
+  min-height: 46px;
+}
+
+/* 点 / 划 的大号符号 */
+.key-mark {
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 26px;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.key-mark.dot {
+  color: var(--ok);
+}
+
+.key-mark.dash {
+  color: var(--accent);
+}
+
+/* 准确度配色 */
+.key-judge.good {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 8%, var(--bg));
+}
+
+.key-judge.ok {
+  border-color: var(--border);
+}
+
+.key-judge.shaky {
+  border-color: var(--warn, #d68a2e);
+  background: color-mix(in srgb, var(--warn, #d68a2e) 10%, var(--bg));
+}
+
+.key-judge-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.key-judge-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.key-judge-sub {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+/* 当前累积的码字（点划串） */
+.key-pending {
+  font-family: var(--mono);
+  font-size: 18px;
+  letter-spacing: 3px;
+  color: var(--text);
+  min-height: 24px;
+  word-break: break-all;
+}
+
+/* 已解出的字符串 */
+.key-chars {
+  font-family: var(--sans);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: var(--text);
+  min-height: 30px;
+  word-break: break-all;
+}
+
+.key-chars .unknown {
+  color: var(--text-faint);
+}
+
+/* 每个字符下方的点划小字 */
+.key-char-item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  margin-right: 10px;
+  vertical-align: top;
+}
+
+.key-char-item .code {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 1px;
+  font-weight: 400;
+}
+
+/* 练习统计条 */
+.key-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-top: 8px;
+}
+
+.key-stats b {
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* ── 响应式 ─────────────────────────────────── */
 @media (max-width: 640px) {
   .appbar {

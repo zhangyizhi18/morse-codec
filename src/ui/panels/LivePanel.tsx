@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   RealtimeDecoder,
+  KeyPracticer,
   decodeAudio,
   estimateWpm,
   type Codebook,
   type DecodeResult,
+  type KeyStroke,
+  type KeyPracticeState,
 } from '@core/index';
 import { MorseText } from '../components/MorseText';
 import {
@@ -240,9 +243,20 @@ export function LivePanel({ codebook, toast, frequency }: Props) {
   const lastPointerIdRef = useRef<number | null>(null);
   /** 按键是否处于按下状态（同步标志，防止连点穿透） */
   const keyActiveRef = useRef(false);
+  /** 手键判定器：从按键时长反推点/划 */
+  const keyPracticerRef = useRef<KeyPracticer | null>(null);
+  /** 练习判定状态（供 UI 渲染） */
+  const [keyState, setKeyState] = useState<KeyPracticeState | null>(null);
+  /** 最近一次按键的判定（用于高亮动画） */
+  const [lastStroke, setLastStroke] = useState<KeyStroke | null>(null);
+  /** 最近解出的字符（用于闪烁提示） */
+  const [lastChar, setLastChar] = useState<string | null>(null);
 
   if (!keyToneRef.current) {
     keyToneRef.current = new KeyTone(600, 0.9);
+  }
+  if (!keyPracticerRef.current) {
+    keyPracticerRef.current = new KeyPracticer(codebook);
   }
 
   /** 按下：开始持续发报 */
@@ -251,9 +265,13 @@ export function LivePanel({ codebook, toast, frequency }: Props) {
     if (keyActiveRef.current) return;
     keyActiveRef.current = true;
 
-    keyStartRef.current = performance.now();
+    const now = performance.now();
+    keyStartRef.current = now;
     setKeyDown(true);
     setKeyHeldMs(0);
+
+    // 通知判定器：按下
+    keyPracticerRef.current?.pressDown(now);
 
     // 持续更新按压时长
     const tick = () => {
@@ -272,7 +290,7 @@ export function LivePanel({ codebook, toast, frequency }: Props) {
     }
   }, []);
 
-  /** 松开：停止发报 */
+  /** 松开：停止发报，并判定这次按键是点还是划 */
   const keyUpHandler = useCallback(() => {
     keyActiveRef.current = false;
     if (holdTimerRef.current !== null) {
@@ -280,9 +298,43 @@ export function LivePanel({ codebook, toast, frequency }: Props) {
       holdTimerRef.current = null;
     }
     keyToneRef.current?.release();
+
+    // 判定本次按键
+    const now = performance.now();
+    const stroke = keyPracticerRef.current?.pressUp(now) ?? null;
+    if (stroke) {
+      setLastStroke(stroke);
+      setKeyState(keyPracticerRef.current?.getState() ?? null);
+    }
+
     setKeyDown(false);
     setKeyHeldMs(0);
   }, []);
+
+  // 手键练习：周期性检查「停顿是否够长」，自动切分字符。
+  //
+  // 手键没有「字符结束」事件，只能靠停顿推断：
+  // 停顿 >= 3u 表示字符结束。这里每 60ms 检查一次，
+  // 保证用户停手后很快能看到解出的字符。
+  useEffect(() => {
+    const kp = keyPracticerRef.current;
+    if (!kp) return;
+
+    const timer = window.setInterval(() => {
+      const ch = kp.idle(performance.now());
+      if (ch) {
+        setKeyState(kp.getState());
+        setLastChar(ch.char);
+      }
+    }, 60);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // 码表变化时同步给判定器（否则查表用的是旧码表）
+  useEffect(() => {
+    keyPracticerRef.current?.setBook(codebook);
+  }, [codebook]);
 
   // 物理键盘：空格按住发报
   useEffect(() => {
@@ -532,7 +584,14 @@ export function LivePanel({ codebook, toast, frequency }: Props) {
             aria-label="电键练习：按住发送"
             onPointerDown={(e) => {
               e.preventDefault();
-              (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+              // setPointerCapture 在部分 WebView / 合成事件下会抛异常，
+              // 一旦抛出就会中断整个按下处理（电键失灵）。
+              // 它只是「指针移出后仍继续接收事件」的优化，失败也不影响发报。
+              try {
+                (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+              } catch {
+                /* 忽略：不影响按键本身 */
+              }
               lastPointerIdRef.current = e.pointerId;
               keyDownHandler();
             }}
@@ -602,6 +661,137 @@ export function LivePanel({ codebook, toast, frequency }: Props) {
                 : '手指按住 / 空格键 / 鼠标左键'}
             </div>
           </div>
+
+          {/*
+            判定反馈。
+            每次松手立即显示：本次是点还是划、时长偏差多少、评级如何。
+            这是手键练习的核心 —— 没有即时反馈就不知道自己的节奏对不对。
+          */}
+          <div
+            className={`key-judge${lastStroke ? ` ${lastStroke.quality}` : ''}`}
+          >
+            <div
+              className={`key-mark${
+                lastStroke ? (lastStroke.mark === '.' ? ' dot' : ' dash') : ''
+              }`}
+            >
+              {lastStroke ? (lastStroke.mark === '.' ? '·' : '—') : '·'}
+            </div>
+            <div className="key-judge-body">
+              {lastStroke ? (
+                <>
+                  <div className="key-judge-title">
+                    {lastStroke.mark === '.' ? '点' : '划'}
+                    {lastStroke.quality === 'good' && (
+                      <span style={{ color: 'var(--ok)' }}> · 准确</span>
+                    )}
+                    {lastStroke.quality === 'ok' && (
+                      <span style={{ color: 'var(--text-faint)' }}>
+                        {' '}
+                        · 基本正确
+                      </span>
+                    )}
+                    {lastStroke.quality === 'shaky' && (
+                      <span style={{ color: 'var(--warn, #d68a2e)' }}>
+                        {' '}
+                        · 节奏不稳
+                      </span>
+                    )}
+                  </div>
+                  <div className="key-judge-sub">
+                    {Math.round(lastStroke.durationMs)} ms
+                    {lastStroke.unitMs > 0 ? (
+                      <>
+                        {' · '}
+                        标准{' '}
+                        {Math.round(
+                          (lastStroke.mark === '.' ? 1 : 3) *
+                            lastStroke.unitMs,
+                        )}
+                        ms
+                        {' · '}
+                        偏差 {Math.round(lastStroke.deviation * 100)}%
+                      </>
+                    ) : (
+                      <> · 正在校准你的速度（再按 3 下）</>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="key-judge-title">等待第一次按键</div>
+                  <div className="key-judge-sub">
+                    第一下会作为你的速度基准（1 单位）
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* 当前字符的码字 + 已解出的字符 */}
+          <div style={{ marginTop: 12 }}>
+            <div className="hint" style={{ marginBottom: 4 }}>
+              当前码字
+            </div>
+            <div className="key-pending">
+              {keyState?.pending || (
+                <span style={{ color: 'var(--text-faint)' }}>—</span>
+              )}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <div className="hint" style={{ marginBottom: 4 }}>
+              已解出
+            </div>
+            <div className="key-chars">
+              {keyState && keyState.chars.length > 0 ? (
+                keyState.chars.map((c, i) => (
+                  <span key={i} className="key-char-item">
+                    <span className={c.char === '?' ? 'unknown' : ''}>
+                      {c.char}
+                    </span>
+                    <span className="code">{c.code}</span>
+                  </span>
+                ))
+              ) : (
+                <span style={{ color: 'var(--text-faint)', fontSize: 14 }}>
+                  还没有完整字符（停顿 3 个单位会自动分隔）
+                </span>
+              )}
+            </div>
+          </div>
+
+          {keyState && keyState.strokeCount > 0 && (
+            <div className="key-stats">
+              <span>
+                速度 <b>{keyState.wpm.toFixed(1)}</b> WPM
+              </span>
+              <span>
+                单位 <b>{Math.round(keyState.unitMs)}</b> ms
+              </span>
+              <span>
+                按键 <b>{keyState.strokeCount}</b> 次
+              </span>
+              {keyState.shakyCount > 0 && (
+                <span style={{ color: 'var(--warn, #d68a2e)' }}>
+                  节奏不稳 <b>{keyState.shakyCount}</b> 次
+                </span>
+              )}
+              <span className="spacer" style={{ flex: 1 }} />
+              <button
+                className="btn sm"
+                onClick={() => {
+                  keyPracticerRef.current?.clearOutput();
+                  setKeyState(keyPracticerRef.current?.getState() ?? null);
+                  setLastStroke(null);
+                  setLastChar(null);
+                }}
+              >
+                清空
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

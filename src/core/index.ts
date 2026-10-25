@@ -6,5 +6,6 @@ export * from './codebook';
 export * from './encoder';
 export * from './decoder';
 export * from './realtime';
+export * from './key-practice';
 export * from './audio-io';
 export * from './codebooks';
